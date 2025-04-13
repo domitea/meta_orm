@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'sequel'
+
 module MetaOrm
   class Model < Sequel::Model
     plugin :timestamps, update_on_create: true
@@ -12,18 +14,17 @@ module MetaOrm
     class << self
       attr_reader :attributes_meta, :transforms, :warnings, :alerts, :enums, :indices, :before_save_callbacks, :after_save_callbacks
 
-      def attribute(name, type:, unit: nil, range: nil, default: nil, display_name: nil, semantic: nil, test_value: nil, enum: nil, index: false, **_opts)
+      def attribute(name, type:, unit: nil, range: nil, default: nil, display_name: nil, semantic: nil, enum: nil, index: false, **_opts)
         @attributes_meta ||= {}
         @attributes_meta[name.to_sym] = {
-          type:          type,
-          unit:          unit,
-          range:         range,
-          default:       default,
-          display_name:  display_name,
-          semantic:      semantic,
-          test_value:    test_value,
-          enum:          enum,
-          index:         index
+          type: type,
+          unit: unit,
+          range: range,
+          default: default,
+          display_name: display_name,
+          semantic: semantic,
+          enum: enum,
+          index: index
         }.compact
 
         if enum
@@ -92,8 +93,23 @@ module MetaOrm
       end
     end
 
+    # method that generates example data
+    # if we have defined range, use rand on that range
+    # if we have default, use default
+    # if we have nothing... it's nil
+    def example_data
+      example_data = {}
+      self.class.attributes_meta.each do |k, meta|
+        example_data[k] = if meta.key?(:range)
+                            Random.rand(meta[:range])
+                          elsif meta.key?(:default)
+                            meta[:default]
+                          end
+      end
+    end
+
     def transform_all!
-      self.class.transforms&.each do |attr, block|
+      self.class.transforms&.each_value do |block|
         instance_exec(&block)
       end
     end
@@ -118,11 +134,11 @@ module MetaOrm
 
     def emit_observe_events
       return unless respond_to?(:changed_columns)
+
       changed_columns.each do |col|
         next unless self.class.attributes_meta.key?(col)
-        if defined?(Takagi::Reactor)
-          Takagi::Reactor.emit(self.class, col, self[col])
-        end
+
+        Takagi::Reactor.emit(self.class, col, self[col]) if defined?(Takagi::Reactor)
       end
     end
 
@@ -132,16 +148,12 @@ module MetaOrm
         val = send(name)
 
         if meta[:range] && !val.nil?
-          unless meta[:range].include?(val)
-            errors.add(name, "must be within #{meta[:range]}")
-          end
+          errors.add(name, "must be within #{meta[:range]}") unless meta[:range].include?(val)
         end
 
-        if meta[:enum] && !val.nil?
-          unless meta[:enum].include?(val)
-            errors.add(name, "must be one of #{meta[:enum].join(", ")}")
-          end
-        end
+        next unless meta[:enum] && !val.nil?
+
+        errors.add(name, "must be one of #{meta[:enum].join(", ")}") unless meta[:enum].include?(val)
       end
     end
   end
