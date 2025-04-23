@@ -1,7 +1,17 @@
 # frozen_string_literal: true
 
-module MetaORM
+require 'sequel/extensions/migration'
+
+module MetaOrm
   class Migrator
+    def self.bootstrap!
+      Dir.mkdir("db") unless Dir.exist?("db")
+      Dir.mkdir("db/migrations") unless Dir.exist?("db/migrations")
+
+      puts "Bootstrapping MetaORM schema..."
+      auto_migrate!
+    end
+
     def self.migrate
       migrations = Dir["db/migrations/*.rb"].sort
       migrations.each do |migration|
@@ -23,19 +33,20 @@ module MetaORM
       DB[:schema_migrations].insert(version: version, created_at: Time.now)
     end
 
-    def self.auto_migrate
-      models = MetaORM::ModelRegistry.models
-      models.each do |model_class|
-        changes = SchemaComparer.compare(model_class)
-        if changes.any?
-          puts "Applying changes for #{model_class.name}:"
-          changes.each { |change| puts "  - #{change}" }
-          DB.alter_table(model_class.table_name) do
-            changes.each { |sql| execute(sql) }
-          end
-        else
-          puts "#{model_class.name} - No changes detected."
-        end
+    def self.auto_migrate!
+      blueprints = MetaOrm::BlueprintRegistry.blueprints
+      migration_files = []
+
+      blueprints.each do |blueprint_class|
+        file = MetaOrm::SchemaComparer.generate_migration(blueprint_class)
+        migration_files << file if file
+      end
+
+      if migration_files.any?
+        puts "\nRunning migrations:"
+        Sequel::Migrator.run(DB, "db/migrations")
+      else
+        puts "\nNo schema changes detected, skipping migration run."
       end
     end
   end

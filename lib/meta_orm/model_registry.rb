@@ -1,4 +1,4 @@
-module MetaORM
+module MetaOrm
   module ModelRegistry
     @models = []
 

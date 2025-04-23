@@ -1,46 +1,25 @@
 # frozen_string_literal: true
 
-require 'sequel'
-
 module MetaOrm
-  class Model < Sequel::Model
-    plugin :timestamps, update_on_create: true
+  class Base < SequelModel
 
     def self.inherited(subclass)
       super
       MetaORM::ModelRegistry.register(subclass)
+
+      subclass.set_dataset(subclass.name.split('::').last.snake_case.pluralize.to_sym) rescue nil
+
+      blueprint_name = "#{subclass.name}Blueprint"
+      if Object.const_defined?(blueprint_name)
+        blueprint = Object.const_get(blueprint_name)
+        blueprint.attributes_meta.each do |name, opts|
+          subclass.attribute(name, **opts)
+        end
+      end
     end
 
     class << self
       attr_reader :attributes_meta, :transforms, :warnings, :alerts, :enums, :indices, :before_save_callbacks, :after_save_callbacks
-
-      def attribute(name, type:, unit: nil, range: nil, default: nil, display_name: nil, semantic: nil, enum: nil, index: false, **_opts)
-        @attributes_meta ||= {}
-        @attributes_meta[name.to_sym] = {
-          type: type,
-          unit: unit,
-          range: range,
-          default: default,
-          display_name: display_name,
-          semantic: semantic,
-          enum: enum,
-          index: index
-        }.compact
-
-        if enum
-          define_method("\#{name}_valid?") do
-            enum.include?(self[name])
-          end
-        end
-
-        if index
-          @indices ||= []
-          @indices << name.to_sym
-        end
-
-        define_method(name) { self[name] } unless method_defined?(name)
-        define_method("\#{name}=") { |val| self[name] = val } unless method_defined?("\#{name}=")
-      end
 
       def transform(name, &block)
         @transforms ||= {}
